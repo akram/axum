@@ -104,7 +104,17 @@ reqwest = { version = "0.12", optional = true, default-features = false, feature
 serde_json = { version = "1.0", features = ["raw_value"], optional = true }
 serde_path_to_error = { version = "0.1.8", optional = true }
 serde_urlencoded = { version = "0.7", optional = true }
-sha1 = { version = "0.10", optional = true }
+# Pinned to the same `0.11` generation used throughout this fork's
+# siblings (russh, ssh-key, ml-kem), rather than upstream's own `0.10` --
+# unifying on one version everywhere is what actually resolves
+# cargo-fips-check's bare-name sha1 ambiguity (RHOAIENG-97009): the tool
+# fails closed on 2+ *present* versions regardless of which specific one
+# a given build reaches, so having `ws-rust-crypto`'s sha1 at a different
+# generation than russh/ssh-key's is just as ambiguous as having it at
+# all on the `openssl` build. No source change needed: `sign()`'s
+# `Sha1::default()/.update()/.finalize()` usage is the same basic
+# `digest::Digest` pattern in both generations.
+sha1 = { version = "0.11", optional = true }
 openssl = { version = "0.10", optional = true }
 tokio = { package = "tokio", version = "1.44", features = ["time"], optional = true }
 # `default-features = false`: the only tungstenite-provided type this crate's
