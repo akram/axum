@@ -104,6 +104,7 @@ use http::{
     Method, StatusCode, Version,
 };
 use hyper_util::rt::TokioIo;
+#[cfg(not(feature = "openssl"))]
 use sha1::{Digest, Sha1};
 use std::{
     borrow::Cow,
@@ -931,6 +932,25 @@ impl From<Message> for Vec<u8> {
     }
 }
 
+/// RFC 6455 section 1.3's handshake accept key: `base64(SHA1(key + GUID))`.
+/// An opaque framing value, not a security-sensitive use of SHA-1, but
+/// still backend-selectable (RHOAIENG-97009) purely because of which
+/// library computes it.
+#[cfg(feature = "openssl")]
+fn sign(key: &[u8]) -> HeaderValue {
+    use base64::engine::Engine as _;
+
+    #[allow(clippy::unwrap_used)] // sha1 is always available in a correctly linked OpenSSL
+    let digest = openssl::hash::hash(
+        openssl::hash::MessageDigest::sha1(),
+        &[key, b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"].concat(),
+    )
+    .unwrap();
+    let b64 = Bytes::from(base64::engine::general_purpose::STANDARD.encode(digest));
+    HeaderValue::from_maybe_shared(b64).expect("base64 is a valid value")
+}
+
+#[cfg(not(feature = "openssl"))]
 fn sign(key: &[u8]) -> HeaderValue {
     use base64::engine::Engine as _;
 
@@ -1110,6 +1130,15 @@ mod tests {
     use tokio::net::TcpStream;
     use tokio_tungstenite::tungstenite;
     use tower::ServiceExt;
+
+    // RFC 6455 section 1.3's own worked example.
+    #[test]
+    fn sign_matches_the_rfc_6455_example() {
+        assert_eq!(
+            sign(b"dGhlIHNhbXBsZSBub25jZQ=="),
+            HeaderValue::from_static("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="),
+        );
+    }
 
     #[crate::test]
     async fn rejects_http_1_0_requests() {

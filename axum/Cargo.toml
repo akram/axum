@@ -35,7 +35,30 @@ query = ["dep:form_urlencoded", "dep:serde_urlencoded", "dep:serde_path_to_error
 tokio = ["dep:hyper-util", "dep:tokio", "tokio/net", "tokio/rt", "tower/make", "tokio/macros"]
 tower-log = ["tower/log"]
 tracing = ["dep:tracing", "axum-core/tracing"]
-ws = ["dep:hyper", "tokio", "dep:tokio-tungstenite", "dep:sha1", "dep:base64"]
+# The `Sec-WebSocket-Accept` handshake header (RFC 6455 section 1.3) is
+# computed with SHA-1, not a security-sensitive use (it's an opaque framing
+# value, not an authentication or confidentiality mechanism), but still on
+# some FIPS-scanner denylists (RHOAIENG-97009) purely because of which
+# library computes it. `ws` alone no longer picks an implementation (unlike
+# upstream, where it always pulls RustCrypto's `sha1`): a consumer must
+# also request either `ws-rust-crypto` (the original behavior) or
+# `openssl` below. This mirrors the `rsa`/`rsa-rust-crypto` split already
+# used elsewhere in this FIPS-migration effort (RHOAIENG-97009) -- `ws`
+# can't default to `ws-rust-crypto` itself, because Cargo features are
+# purely additive: that would pull `dep:sha1` even when a consumer reaches
+# `ws` only indirectly through `openssl`, below.
+ws = ["dep:hyper", "tokio", "dep:tokio-tungstenite", "dep:base64"]
+ws-rust-crypto = ["ws", "dep:sha1"]
+# Also drops tokio-tungstenite's default features (`connect`+`handshake`,
+# which in turn pull tungstenite's own `handshake` feature and its own
+# separate `sha1` dependency): axum's own WebSocket support only ever
+# constructs a `WebSocketStream` over an already-upgraded connection via
+# `from_raw_socket`, which needs none of those features -- `connect`/
+# `handshake` are for initiating outbound connections and performing their
+# own handshake, both already done by axum/hyper's own upgrade machinery
+# (dev-dependencies restores `connect` for this crate's own client-role
+# tests, which are never shipped).
+openssl = ["dep:openssl", "ws"]
 
 __private_docs = [
     # We re-export some docs from axum-core via #[doc(inline)],
@@ -82,8 +105,17 @@ serde_json = { version = "1.0", features = ["raw_value"], optional = true }
 serde_path_to_error = { version = "0.1.8", optional = true }
 serde_urlencoded = { version = "0.7", optional = true }
 sha1 = { version = "0.10", optional = true }
+openssl = { version = "0.10", optional = true }
 tokio = { package = "tokio", version = "1.44", features = ["time"], optional = true }
-tokio-tungstenite = { version = "0.29.0", optional = true }
+# `default-features = false`: the only tungstenite-provided type this crate's
+# shipped code uses is `WebSocketStream::from_raw_socket`, which isn't
+# feature-gated at all. `connect`/`handshake` (tokio-tungstenite's defaults)
+# are for establishing outbound connections and performing a handshake
+# tungstenite itself computes (pulling in its own separate `sha1`
+# dependency) -- axum's own upgrade handling (hyper) and `sign()` (below)
+# already do both, so neither is needed. Restored for this crate's own
+# client-role tests via the dev-dependency below.
+tokio-tungstenite = { version = "0.29.0", optional = true, default-features = false }
 tracing = { version = "0.1", default-features = false, optional = true }
 
 # doc dependencies
